@@ -1,4 +1,4 @@
-# AWS Glue PySpark - delta.io Quick Start Guide
+# AWS Glue PySpark - Delta Lake (delta.io) Quick Start Guide
 
 ## Disclaimer:
 This is a quick start guide for the Delta Lake (delta.io) Python Spark connector, running on AWS Glue.
