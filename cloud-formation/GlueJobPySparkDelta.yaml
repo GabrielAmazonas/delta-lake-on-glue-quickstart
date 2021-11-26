@@ -1,0 +1,79 @@
+Description: "AWS Glue Job with delta.io Jars Configured - Specifically for AWS Glue 2.0 - PySpark 3.0 and Apache Hudi 9.0"
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Bucket name for the S3 bucket resource
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+  GlueJobName:
+    Type: String
+    Description: Glue Job name for the Job resource
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+  DeltaJobName:
+    Type: String
+    Description: Name of the Hudi Spark Jar file ("Ending in .py")
+    AllowedPattern: ^.*.py
+    ConstraintDescription: Must end with .py.
+  DeltaSparkJarName:
+    Type: String
+    Description: Name of the Hudi Spark Jar file ("Ending in .jar")
+    AllowedPattern: ^.*.jar
+    ConstraintDescription: Must end .jar.
+Resources:
+  MyJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "glue.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: "root"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+  MyBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Join:
+        - "-"
+        - - Ref: S3BucketName
+          - Ref: AWS::AccountId
+  MyJob:
+    Type: AWS::Glue::Job
+    Properties:
+      GlueVersion: "3.0"
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${S3BucketName}-${AWS::AccountId}/jobs/${DeltaJobName}"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--enable-spark-ui": true
+        "--spark-event-logs-path" : !Sub "s3://${S3BucketName}-${AWS::AccountId}/tmp/spark-logs"
+        "--enable-glue-datacatalog": ""
+        "--spark.sql.extensions": "io.delta.sql.DeltaSparkSessionExtension"
+        "--spark.sql.catalog.spark_catalog": "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+        "--base_s3_path" : !Sub "s3a://${S3BucketName}-${AWS::AccountId}"
+        "--extra-jars": !Sub "s3://${S3BucketName}-${AWS::AccountId}/jars/${DeltaSparkJarName}"
+        "--extra-py-files": !Sub "s3://${S3BucketName}-${AWS::AccountId}/jars/${DeltaSparkJarName}"
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      MaxRetries: 0
+      Name: !Ref GlueJobName
+      Role: !Ref MyJobRole
+
+  

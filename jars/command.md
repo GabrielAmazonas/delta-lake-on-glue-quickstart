@@ -1,0 +1,1 @@
+python3 upload_jar.py -filename delta-core_2.12-1.0.0.jar -bucket glue-delta-bucket -awsprofile dev
