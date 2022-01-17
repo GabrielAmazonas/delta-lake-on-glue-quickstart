@@ -76,6 +76,6 @@ On the AWS Glue console, you can run the Glue Job by clicking on the job name.
 
 After the job is finished, you can check the Glue Data Catalog and query the new database from AWS Athena.
 
-On AWS Athena check for the database: delta_demo and for the table: delta_table_test.
+On AWS Athena check for the database: delta_demo and for the table: delta_employee.
 
 

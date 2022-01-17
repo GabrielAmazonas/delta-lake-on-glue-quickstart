@@ -62,18 +62,19 @@ Resources:
         ScriptLocation: !Sub "s3://${S3BucketName}-${AWS::AccountId}/jobs/${DeltaJobName}"
       DefaultArguments:
         "--job-bookmark-option": "job-bookmark-enable"
-        "--enable-spark-ui": true
         "--spark-event-logs-path" : !Sub "s3://${S3BucketName}-${AWS::AccountId}/tmp/spark-logs"
         "--enable-glue-datacatalog": ""
-        "--spark.sql.extensions": "io.delta.sql.DeltaSparkSessionExtension"
-        "--spark.sql.catalog.spark_catalog": "org.apache.spark.sql.delta.catalog.DeltaCatalog"
         "--base_s3_path" : !Sub "s3a://${S3BucketName}-${AWS::AccountId}"
+        "--fake_row_count" : "100"
         "--extra-jars": !Sub "s3://${S3BucketName}-${AWS::AccountId}/jars/${DeltaSparkJarName}"
         "--extra-py-files": !Sub "s3://${S3BucketName}-${AWS::AccountId}/jars/${DeltaSparkJarName}"
+        "--additional-python-modules": "faker==11.3.0"
       ExecutionProperty:
         MaxConcurrentRuns: 2
       MaxRetries: 0
       Name: !Ref GlueJobName
       Role: !Ref MyJobRole
-
+      WorkerType: "Standard"
+      NumberOfWorkers: 2
+      Timeout: 10
   
