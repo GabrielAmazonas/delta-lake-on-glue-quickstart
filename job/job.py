@@ -7,7 +7,7 @@ from awsglue.dynamicframe import DynamicFrame
 from awsglue.context import GlueContext
 from delta import *
 from delta import DeltaTable
-
+from faker import Faker
 
 
 import os
@@ -15,9 +15,6 @@ import sys
 
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
-
-# The KryoSerializer is necessary for the SparkSession to be able to serialize objects
-
 
 def create_spark_session():
     spark = SparkSession \
@@ -35,70 +32,106 @@ glueContext = GlueContext(sc)
 
 # Cloud Formation Template Parameters
 args = getResolvedOptions(sys.argv,
-                          ['base_s3_path'])
+                          ['base_s3_path', 'fake_row_count'])
 
 # Simulation of Delta Lake Layers
 base_s3_path = args['base_s3_path']
-target_s3_path = "{base_s3_path}/tmp/delta_target".format(
+target_s3_path = "{base_s3_path}/tmp/delta_employee".format(
     base_s3_path=base_s3_path)
 
 table_name = "delta_table"
-final_base_path = "{base_s3_path}/tmp/delta_table".format(
+final_base_path = "{base_s3_path}/tmp/final/delta_employee".format(
     base_s3_path=base_s3_path)
 
-print("Writing delta table")
+# Initialize Faker for performance evaluation
+fake_row_count = int(args['fake_row_count'])
+
+fake = Faker()
+
+fake_workers = [(
+        fake.unique.random_int(min=1, max=fake_row_count),
+        fake.name(),
+        fake.random_element(elements=('IT', 'HR', 'Sales', 'Marketing')),
+        fake.random_element(elements=('CA', 'NY', 'TX', 'FL', 'IL', 'RJ')),
+        fake.random_int(min=10000, max=150000),
+        fake.random_int(min=18, max=60),
+        fake.random_int(min=0, max=100000),
+        fake.unix_time()
+      ) for x in range(fake_row_count)]
+
+table_name = "delta_employee"
+
+columns= ["emp_id", "employee_name","department","state","salary","age","bonus","ts"]
+emp_df = spark.createDataFrame(data = fake_workers, schema = columns)
+
+print("DF from fake workers: \n")
+print(emp_df.show(10))
+
 # Write table
-data = spark.range(0, 5)
-data.write.format("delta").mode("overwrite").save(target_s3_path)
+emp_df.write.format("delta").mode("overwrite").save(target_s3_path)
 
 print("Writing delta table succeeded.")
 
 print("Reading delta table:")
 # Read table
-df = spark.read.format("delta").load(target_s3_path)
-df.show()
+emp_df_read = spark.read.format("delta").load(target_s3_path)
+emp_df_read.show()
 print("Reading delta succeeded:")
 
-print("Overwriting delta table with updates:")
-#Update table data
-data = spark.range(5, 10)
-data.write.format("delta").mode("overwrite").save(target_s3_path)
+emp_df_read.createOrReplaceTempView("delta_employee_view")
+table_name = "delta_employee"
 
-print("Reading after update: ")
+# Create delta Table and show its results
+spark.sql(f"CREATE DATABASE IF NOT EXISTS delta_demo")
 
-# Reload complete table
-df = spark.read.format("delta").load(target_s3_path)
-df.show()
+spark.sql("DROP TABLE IF EXISTS delta_demo.{table_name}".format(table_name=table_name))
+existing_tables = spark.sql(f"SHOW TABLES IN delta_demo;")
 
-print("Reading using time travel: ")
+df_existing_tables = existing_tables.select('tableName').rdd.flatMap(lambda x:x).collect()
 
-#Reading using time travel
-df = spark.read.format("delta").option("versionAsOf", 0).load(target_s3_path)
-df.show()
+if table_name not in df_existing_tables:
+    print("Table delta_employee does not exist in Glue Catalog. Creating it now.")
 
-print("Reading normally to create catalog: ")
+    print("Creating manifest file")
+    deltaTable = DeltaTable.forPath(spark, target_s3_path)
+    deltaTable.generate("symlink_format_manifest")
 
-# Reload complete table
-df = spark.read.format("delta").load(target_s3_path)
-df.show()
+    spark.sql(
+        f"CREATE TABLE IF NOT EXISTS delta_demo.delta_employee USING PARQUET LOCATION '{target_s3_path}/_symlink_format_manifest/' as (SELECT * from delta_employee_view)")
+    
+# Upsert records into delta table
+simpleDataUpd = [
+    (3, "Gabriel","Sales","RJ",81000,30,23000,827307999), \
+    (7, "Paulo","Engineering","RJ",79000,53,15000,1627694678), \
+  ]
 
-df.createOrReplaceTempView("delta_table_snapshot")
-print("Time to Glue Catalog integration")
+columns= ["emp_id", "employee_name","department","state","salary","age","bonus","ts"]
+emp_up_df = spark.createDataFrame(data = simpleDataUpd, schema = columns)
 
-print("Creating manifest file")
-deltaTable = DeltaTable.forPath(spark, target_s3_path)
-deltaTable.generate("symlink_format_manifest")
 
-print("Manifest created, writing as table:")
-df.write.format("delta").mode("overwrite").option("path", target_s3_path).saveAsTable("delta_demo.delta_table_test")
+print("Employee Updates:")
+print(emp_up_df.show())
 
-print("Droping and re-creating table with spark.sql")
+emp_up_df.createOrReplaceTempView("delta_employee_updt")
 
-spark.sql("DROP TABLE IF EXISTS delta_demo.delta_table_test;")
+print("Merge into delta Table:")
+empDeltaTable = DeltaTable.forPath(spark, target_s3_path)
 
-spark.sql(
-    f"CREATE TABLE IF NOT EXISTS delta_demo.delta_table_test USING PARQUET LOCATION '{target_s3_path}/_symlink_format_manifest/' as (SELECT * from delta_table_snapshot)")
+empDeltaTable.alias("employee_table").merge(
+    emp_up_df.alias("updates"),
+    "employee_table.emp_id = updates.emp_id") \
+  .whenMatchedUpdateAll() \
+  .whenNotMatchedInsertAll() \
+  .execute()
 
-print(f"Table delta_demo.delta_table_test created")
+print("Merge Into delta table started")
+empDeltaTable.toDF().createOrReplaceTempView("delta_employee_view_updt")
+spark.sql("DROP TABLE IF EXISTS delta_demo.{table_name}".format(table_name=table_name))
+empDeltaTable.generate("symlink_format_manifest")
+spark.sql(f"CREATE TABLE IF NOT EXISTS delta_demo.delta_employee USING PARQUET LOCATION '{target_s3_path}/_symlink_format_manifest/' as (SELECT * from delta_employee_view_updt)")
 
-print("CREATE EXTERNAL TABLE command ran successfully")
+print("Merge Into delta table success - check results:\n")
+
+delta_merge_df = spark.sql(f"SELECT * FROM delta_demo.delta_employee where emp_id = 3 or emp_id = 7")
+print("Delta Table Results after merge:\n")
+print(delta_merge_df.show())
