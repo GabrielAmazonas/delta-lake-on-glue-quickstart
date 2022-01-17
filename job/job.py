@@ -49,7 +49,7 @@ fake_row_count = int(args['fake_row_count'])
 fake = Faker()
 
 fake_workers = [(
-        fake.unique.random_int(min=1, max=fake_row_count),
+        x,
         fake.name(),
         fake.random_element(elements=('IT', 'HR', 'Sales', 'Marketing')),
         fake.random_element(elements=('CA', 'NY', 'TX', 'FL', 'IL', 'RJ')),
